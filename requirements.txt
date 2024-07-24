@@ -1,0 +1,5 @@
+lecroyparser
+matplotlib 
+pandas 
+seaborn 
+scipy 
