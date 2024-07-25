@@ -177,15 +177,10 @@ def process_files(dir_url, i_pmt, n_files, i_hv, hv, cut, is_noisy_pmt, verbose)
             download_tasks.append((full_url, full_path))
 
     if download_tasks:
-        try:
             with ThreadPoolExecutor(max_workers=8) as executor:
                     futures = [executor.submit(download_file, url, path, logger, verbose) for url, path in download_tasks]
                     for future in futures:
                         future.result()
-        except KeyboardInterrupt:
-                print("KeyboardInterrupt detected. Gracefully shutting down download threads . . .")
-                executor.shutdown(wait=False, cancel_futures=True)
-                print('Finished shutting down the thread pool.')
 
     for i_file in range(n_files):
         file_number = f"{i_file:05d}"
@@ -268,11 +263,10 @@ def process_pmt(i_pmt, pmt_cuts, verbose):
     cuts = pmt_cuts[i_pmt - 1]
 
     try:
-        with ProcessPoolExecutor() as executor:
+        with ProcessPoolExecutor(max_workers=4) as executor:
             futures = [executor.submit(process_files, dir_url, i_pmt, n_files, i_hv, hv, cuts[i_hv], is_noisy_pmt, verbose)
                        for i_hv, (hv, dir_url, n_files) in enumerate(zip(hv_list, dir_url_list, n_files_list))]
-            for f in futures:
-                pass
+
             for future in as_completed(futures):
                 try:
                     i_hv, hv, mean_charge, std_dev_charge = future.result()
@@ -286,10 +280,7 @@ def process_pmt(i_pmt, pmt_cuts, verbose):
             pickle.dump(charges, file)
 
         print(f"PMT {i_pmt} processed successfully.")
-    except KeyboardInterrupt:
-        print("KeyboardInterrupt detected. Gracefully shutting down PMT processes. . .")
-        executor.shutdown(wait=False, cancel_futures=True)
-        print('Finished shutting down the process pool.')
+
     finally:
         logging.shutdown()
 
