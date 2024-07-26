@@ -23,12 +23,13 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 matplotlib.use('Agg')
 sns.set_theme()
 
-USAMPLE = 150 # -1: read all (https://pypi.org/project/lecroyparser/)
+USAMPLE = 150 # Number of data points to analyze per signal (see https://pypi.org/project/lecroyparser/)
 PMT_NAMES = [f'PMT_{i}' for i in range(1,5)]
-PARAM_NAMES = ["a", "c", "tau_s", "tau"]
+PARAM_NAMES = ["a", "c", "tau_s", "tau"] # Parameters for the fit function
 PARAM_ESTIMATES = [-0.5, -7.75e-8, 9.3e-10, 3.5e-9]
 PARAM_BOUNDS = ([-10, +4e-8, 1e-10, 1e-10], [0, +5.5e-8, 1e-8, 1e-8])
 
+# Creates and print the directories for data and output files
 def list_directories():
     data_dir = "./data/"
     outputs_dir = "./outputs/"
@@ -63,6 +64,7 @@ def list_directories():
             voltages.sort(key=int) 
             print(f"\tHV values for PMT_{i+1} ({len(voltages)} values):\n\t{voltages}\n")
 
+# Loads list containing the voltage threshold values to accept a signal
 def load_pmt_cuts():
     try:
         with open('./data_info/pmt_cuts.pkl', 'rb') as file:
@@ -73,6 +75,7 @@ def load_pmt_cuts():
         print(f"Error loading pmt_cuts.pkl: {e}")
         sys.exit(1)
 
+# Loads analysis results, previously saved as .pkl files
 def load_pickle_lists():
     try:
         pmt_data_list = []
@@ -89,13 +92,7 @@ def load_pickle_lists():
         print(f"Error loading pickle file: {e}")
         sys.exit(1)
 
-def create_fitting_function(b):
-    def fitting_function(x, a, c, tau_s, tau):
-        if tau == tau_s:
-            return np.where(x < c, b, a * (x - c) * np.exp(-(x - c) / tau_s))
-        return np.where(x < c, b, -a * (np.exp(-(x - c) / tau_s) - np.exp(-(x - c) / tau)) + b)
-    return fitting_function
-
+# Creates the PMT signal function used for fitting with PyROOT
 def create_fitting_function_root(b):
     def fitting_function_root(x, par):
         a, c, tau_s, tau = par[0], par[1], par[2], par[3] 
@@ -108,7 +105,15 @@ def create_fitting_function_root(b):
         return func
     return fitting_function_root
 
-# Create a context manager to temporarily redirect stdout to /dev/null
+# Creates the PMT signal function to be integrated after fitting
+def create_fitted_function(b):
+    def fitting_function(x, a, c, tau_s, tau):
+        if tau == tau_s:
+            return np.where(x < c, b, a * (x - c) * np.exp(-(x - c) / tau_s))
+        return np.where(x < c, b, -a * (np.exp(-(x - c) / tau_s) - np.exp(-(x - c) / tau)) + b)
+    return fitting_function
+
+# Creates a context manager to temporarily redirect stdout to /dev/null
 @contextlib.contextmanager
 def suppress_output():
     with open(os.devnull, 'w') as null_stream:
@@ -117,6 +122,7 @@ def suppress_output():
         yield
         sys.stdout = original_stdout
 
+# Configures the .log files for different PMT and voltage values
 def configure_logger(pmt_number, hv):
     logger = logging.getLogger(f"PMT_{pmt_number}_{hv}V_logger")
     logger.setLevel(logging.INFO)
@@ -128,7 +134,7 @@ def configure_logger(pmt_number, hv):
     logger.addHandler(handler)
     return logger
 
-
+# Reads .txt files in data_info/ and extracts useful information
 def read_parameters(file_path):
     dir_urls, hv_list, n_files_list = [], [], []
     with open(file_path, 'r') as file:
@@ -144,6 +150,7 @@ def read_parameters(file_path):
         n_files_list.append(n_files)
     return dir_urls, hv_list, n_files_list
 
+# Downloads the .trc data files from S3 in INFN Cloud
 def download_file(full_url, full_path, logger, verbose):
     try:
         response = requests.get(full_url)
@@ -156,7 +163,7 @@ def download_file(full_url, full_path, logger, verbose):
     except requests.exceptions.RequestException as e:
         logger.warning(f"Failed to download file {full_url}: {e}")
 
-
+# Main analysis function
 def process_files(dir_url, i_pmt, n_files, i_hv, hv, cut, is_noisy_pmt, verbose):
     logger = configure_logger(i_pmt, hv)
     charge = pd.Series(dtype = float, index=range(n_files))
@@ -166,6 +173,7 @@ def process_files(dir_url, i_pmt, n_files, i_hv, hv, cut, is_noisy_pmt, verbose)
     remote_base_url = 'https://s3.cloud.infn.it/v1/AUTH_2ebf769785574195bde2ff418deac08a/cygno-analysis/GIN_PMT/'
     local_dir = os.path.join(local_base_dir, dir_url.replace(remote_base_url, '').split('Autosave')[0])
     
+    # Download all files of a specific PMT and high voltage in parallel (if not already present locally)
     download_tasks = []
     for i_file in range(n_files):
         file_number = f"{i_file:05d}"
@@ -182,6 +190,7 @@ def process_files(dir_url, i_pmt, n_files, i_hv, hv, cut, is_noisy_pmt, verbose)
                     for future in futures:
                         future.result()
 
+    # Analysis loop over all .trc files of a specific PMT and high voltage 
     for i_file in range(n_files):
         file_number = f"{i_file:05d}"
         file_name = f"C1--n16deg--{file_number}.trc"
@@ -197,14 +206,14 @@ def process_files(dir_url, i_pmt, n_files, i_hv, hv, cut, is_noisy_pmt, verbose)
             logger.warning(f"Failed to open local file {full_path}: {e}")
             continue
             
-        data_raw_rs = scipy_signal.resample(data_raw.y, USAMPLE, data_raw.x)
+        data_raw_rs = scipy_signal.resample(data_raw.y, USAMPLE, data_raw.x) # Reduces number of data points to be fitted to improve speed
         data = pd.DataFrame({'Time (s)': data_raw_rs[1], 'Amplitude (V)': data_raw_rs[0]})
 
+        # Finds best initial guesses of the PMT signal function
         min_index = data['Amplitude (V)'].iloc[20:-20].idxmin()
         if pd.isna(min_index) or min_index <= 11 or data['Amplitude (V)'].iloc[min_index] >= cut:
             logger.warning(f"Warning: minimum not found for {PMT_NAMES[i_pmt-1]}, {hv} V, file {file_name}")
             continue
-
         a = data['Amplitude (V)'].iloc[min_index] * 2.5 
         end_bkg_index = (data['Amplitude (V)'][:min_index][::-1] > 0).idxmax()
         if end_bkg_index <= 10:
@@ -229,7 +238,7 @@ def process_files(dir_url, i_pmt, n_files, i_hv, hv, cut, is_noisy_pmt, verbose)
             logger.warning(f"Warning: integration range out of data range, skipping {PMT_NAMES[i_pmt-1]}, {hv} V, file {file_name}")
             continue
 
-        ###### ROOT ######
+        # Fit with PyROOT
         graph = ROOT.TGraph(len(data['Time (s)']), np.array(data['Time (s)'], dtype=np.float64), np.array(data['Amplitude (V)'], dtype=np.float64))
         fitting_function_root = create_fitting_function_root(b)
         fit_function_root = ROOT.TF1("fit_function_root", fitting_function_root, data['Time (s)'].iloc[start_index], data['Time (s)'].iloc[end_index], 4)
@@ -242,16 +251,19 @@ def process_files(dir_url, i_pmt, n_files, i_hv, hv, cut, is_noisy_pmt, verbose)
         fit_results = graph.GetFunction("fit_function_root")
         fitted_parameters = [fit_results.GetParameter(i) for i in range(4)]
 
-        fitting_function = create_fitting_function(b)
-        integration_function = lambda x: fitting_function(x, *fitted_parameters)
+        # Integration within the appropriate time range to extract produced charge
+        fitted_function = create_fitted_function(b)
+        integration_function = lambda x: fitted_function(x, *fitted_parameters)
         charge[i_file], _ = integrate.quad(integration_function, data["Time (s)"].loc[start_index], data["Time (s)"].loc[end_index])
 
+    # Computes mean and std dev of produced charge
     charge = charge[:i_file + 1]
     mean_charge = charge.mean() / 50. * 1e+12
     std_dev_charge = charge.std() / 50. * 1e+12
     logger.handlers.clear()
     return (i_hv, hv, mean_charge, std_dev_charge)
 
+# Loops over all high voltage values of a PMT with parallel processing
 def process_pmt(i_pmt, pmt_cuts, verbose):
     file_path = f'./data_info/data_directories_pmt_{i_pmt}.txt'
     dir_url_list, hv_list, n_files_list = read_parameters(file_path)
@@ -284,6 +296,7 @@ def process_pmt(i_pmt, pmt_cuts, verbose):
     finally:
         logging.shutdown()
 
+# Final function used to save gain_curves.png
 def plot_charge_curves(pmt_data_list, pmt_names):
     plt.figure(figsize=(12, 9))
     custom_palette = sns.color_palette("Set1", n_colors=len(pmt_data_list))

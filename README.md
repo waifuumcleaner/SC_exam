@@ -11,21 +11,7 @@ This project was developed within the [CYGNO collaboration](https://web.infn.it/
   <br><em>The GIN prototype. </em>
 </p>
 
-### Experimental Setup
-
-The setup, partially enclosed in a black box to avoid external light, consists of the following components:
-
-1. Photomultiplier tubes (PMTs) provided by Hamamatsu
-2. Light pulse generator (fast LED driver) which also functions as a trigger for the acquisition of the PMT waveform
-3. Tunable high voltage power supply
-4. Digital oscilloscope provided by LeCroy
-
-A visible light pulse is produced by the fast LED driver towards the PMT at a specific frequency. With the same frequency, a trigger is sent to the oscilloscope to acquire the PMT voltage signal. The PMT is supplied with different high voltage values to study its response by measuring the produced charge. The result is a gain curve for each PMT.
-
-<p align="center">
-  <img src="docs/setup.png" alt="Setup" width="500" />
-  <br><em>Setup during the data taking: the PMT is mounted on the left, and the light pulse is sent from the LED driver on the right.</em>
-</p>
+The data for the characterization of the PMTs were obtained by directing a visible light pulse from a fast LED driver towards different PMTs at a specific frequency. Simultaneously, a trigger was sent to an oscilloscope to capture the PMT voltage signal. By varying the high voltage supplied to the PMTs, their response was studied through the measurement of the produced charge, resulting in a gain curve for each PMT.
 
 ### Data management
 
@@ -38,14 +24,14 @@ The data consist of single triggered amplitude signals, recorded with a LeCroy d
   <br><em>Typical PMT voltage signal data and fitted function.</em>
 </p>
 
-In this project, the data files, if not present locally, are accessed and downloaded through a direct URL call of the type `https://s3.cloud.infn.it/v1/AUTH_xxxxxxx/<bucket-name>/<tag>/<file-name>` .
+In this project, the data files, if not present locally, are accessed and downloaded from S3 through a direct URL call.
 
 ### Analysis
 
 Due to the high volume of data files, the code is structured to download and process data of different PMTs in parallel. If it is possible to use an HTCondor pool with the installed requirements, the analysis can be performed by sending separate jobs for different PMTs and high voltage values, as explained in [Running with HTCondor](#running-with-htcondor).
 Each voltage signal is fitted with the typical PMT signal function, using [PyROOT](https://root.cern/manual/python/). The signal is integrated within the appropriate time range to obtain the produced charge in the PMT, according to the formula:
 <p align="center">
-  <img src="docs/eq.png" alt="Eq" width="100" />
+  <img src="docs/eq.png" alt="Eq" width="150" />
 </p>
 The gain for a specific high voltage is then computed as the mean of all signal charges, with the standard deviation associated as its uncertainty. 
 The analyzed data in this project come from four different PMTs, in the high voltage range 700-1400 V.
@@ -62,7 +48,7 @@ The analyzed data in this project come from four different PMTs, in the high vol
       - [gain_curve.py](./gain_curve.py) creates the final result of the analysis after the output files produced by the HTCondor jobs have been retrieved.
       - [exec_condor.sh](./exec_condor.sh) is the file executed in the HTCondor jobs, calling [analysis_condor.py](./analysis_condor.py).
       - [submit_condor_jobs.sh](./submit_condor_jobs.sh) generates the submit files for HTCondor.
-   - When running the program, the `data` and `outputs` folders are created, containing the downloaded and processed PMT data,output files, and logs.
+   - When running the program, the `data` and `outputs` folders are created, containing the downloaded and processed PMT data, output files, and logs.
 
 ## Installation and Usage
 ### Prerequisites
@@ -108,6 +94,7 @@ This will create 4 submit files, corresponding to the 4 different analyzed PMTs,
 python3 gain_curve_condor.py
 ```
 ### Outputs
-During the analysis (locally or with Docker), real-time updates can be found in the .log files produced in the `outputs/logs` folder (which is created when running the program). If the project is run in an HTCondor Pool, upon executing `condor_transfer_data <ClusterID>`, the HTCondor output files can be found in the `outputs/condor_errors`, `outputs/condor_logs`, and `outputs/condor_outputs` subfolders.
+During the analysis (locally or with Docker), real-time updates can be found in the .log files created in the `outputs/logs` folder. Occasionally, some signals are too noisy to provide useful information on the produced charge. When this occurs, a warning is printed, and the analysis proceeds to process the next files.  
+If the project is run in an HTCondor Pool, upon executing `condor_transfer_data <ClusterID>`, the HTCondor output files can be found in the `outputs/condor_errors`, `outputs/condor_logs`, and `outputs/condor_outputs` subfolders.
 The analysis produces Pandas dataframes, saved as .pkl files (found in `outputs/lists` or `outputs/condor_lists`, depending on how the project is run). These are then used to create the final result of the analysis, which are the gain curves, saved as `outputs/gain_curves.png`.
 
